@@ -71,20 +71,20 @@ interface QueuePromptRequestBody {
       workflow: ComfyWorkflowJSON
     }
     /**
-     * The auth token for the comfy org account if the user is logged in.
-     *
-     * Backend node can access this token by specifying following input:
-     * ```python
-      @classmethod
-      def INPUT_TYPES(s):
-        return {
-          "hidden": { "auth_token": "AUTH_TOKEN_COMFY_ORG"}
-        }
+         * The auth token for the comfy org account if the user is logged in.
+         *
+         * Backend node can access this token by specifying following input:
+         * ```python
+         @classmethod
+         def INPUT_TYPES(s):
+         return {
+         "hidden": { "auth_token": "AUTH_TOKEN_COMFY_ORG"}
+         }
 
-      def execute(self, auth_token: str):
-        print(f"Auth token: {auth_token}")
-     * ```
-     */
+         def execute(self, auth_token: str):
+         print(f"Auth token: {auth_token}")
+         * ```
+         */
     auth_token_comfy_org?: string
     /**
      * The auth token for the comfy org account if the user is logged in.
@@ -295,7 +295,6 @@ export class PromptExecutionError extends Error {
 }
 
 export class ComfyApi extends EventTarget {
-  private _registered = new Set()
   api_host: string
   api_base: string
   /**
@@ -311,27 +310,11 @@ export class ComfyApi extends EventTarget {
    */
   user: string
   socket: WebSocket | null = null
-
-  /**
-   * Cache Firebase auth store composable function.
-   */
-  private authStoreComposable?: typeof useFirebaseAuthStore
-
   reportedUnknownMessageTypes = new Set<string>()
-
-  /**
-   * Get feature flags supported by this frontend client.
-   * Returns a copy to prevent external modification.
-   */
-  getClientFeatureFlags(): Record<string, unknown> {
-    return { ...defaultClientFeatureFlags }
-  }
-
   /**
    * Feature flags received from the backend server.
    */
   serverFeatureFlags: Record<string, unknown> = {}
-
   /**
    * The auth token for the comfy org account if the user is logged in.
    * This is only used for {@link queuePrompt} now. It is not directly
@@ -349,66 +332,65 @@ export class ComfyApi extends EventTarget {
    * The API key for the comfy org account if the user logged in via API key.
    */
   apiKey?: string
+  private _registered = new Set()
+  private _overrideProtocol: string | null = null
+  /**
+   * Cache Firebase auth store composable function.
+   */
+  private authStoreComposable?: typeof useFirebaseAuthStore
 
   constructor() {
     super()
     this.user = ''
-    this.api_host = location.host
-    this.api_base = isCloud
-      ? ''
-      : location.pathname.split('/').slice(0, -1).join('/')
+
+    // Allow overriding the ComfyUI backend via ?host=https://comfy-server.com/comfyUI
+    const hostParam = new URLSearchParams(window.location.search).get('host')
+
+    if (hostParam) {
+      // Parse the custom host URL (e.g. https://comfy-server.com/comfyUI)
+      const parsed = new URL(hostParam)
+      this.api_host = parsed.host // "comfy-server.com"
+      this.api_base = parsed.pathname.replace(/\/$/, '') // "/comfyUI"
+      this._overrideProtocol = parsed.protocol // "https:" | "http:"
+    } else {
+      this.api_host = location.host
+      this.api_base = isCloud
+        ? ''
+        : location.pathname.split('/').slice(0, -1).join('/')
+      this._overrideProtocol = null
+    }
+
     this.initialClientId = sessionStorage.getItem('clientId')
   }
 
+  /**
+   * Get feature flags supported by this frontend client.
+   * Returns a copy to prevent external modification.
+   */
+  getClientFeatureFlags(): Record<string, unknown> {
+    return { ...defaultClientFeatureFlags }
+  }
+
   internalURL(route: string): string {
+    if (this._overrideProtocol) {
+      return `${this._overrideProtocol}//${this.api_host}${this.api_base}/internal${route}`
+    }
     return this.api_base + '/internal' + route
   }
 
   apiURL(route: string): string {
+    if (this._overrideProtocol) {
+      // Build absolute URL for external host
+      return `${this._overrideProtocol}//${this.api_host}${this.api_base}/api${route}`
+    }
     return this.api_base + '/api' + route
   }
 
   fileURL(route: string): string {
+    if (this._overrideProtocol) {
+      return `${this._overrideProtocol}//${this.api_host}${this.api_base}${route}`
+    }
     return this.api_base + route
-  }
-
-  /**
-   * Gets the Firebase auth store instance using cached composable function.
-   * Caches the composable function on first call, then reuses it.
-   * Returns null for non-cloud distributions.
-   * @returns The Firebase auth store instance, or null if not in cloud
-   */
-  private async getAuthStore() {
-    if (isCloud) {
-      if (!this.authStoreComposable) {
-        const module = await import('@/stores/firebaseAuthStore')
-        this.authStoreComposable = module.useFirebaseAuthStore
-      }
-
-      return this.authStoreComposable()
-    }
-  }
-
-  /**
-   * Waits for Firebase auth to be initialized before proceeding.
-   * Includes 10-second timeout to prevent infinite hanging.
-   */
-  private async waitForAuthInitialization(): Promise<void> {
-    if (isCloud) {
-      const authStore = await this.getAuthStore()
-      if (!authStore) return
-
-      if (authStore.isInitialized) return
-
-      try {
-        await Promise.race([
-          until(authStore.isInitialized),
-          promiseTimeout(10000)
-        ])
-      } catch {
-        console.warn('Firebase auth initialization timeout after 10 seconds')
-      }
-    }
   }
 
   async fetchApi(route: string, options?: RequestInit) {
@@ -437,7 +419,9 @@ export class ComfyApi extends EventTarget {
       }
     }
 
-    addHeaderEntry(headers, 'Comfy-User', this.user)
+    if (!this._overrideProtocol) {
+      addHeaderEntry(headers, 'Comfy-User', this.user)
+    }
     return fetch(this.apiURL(route), {
       cache: 'no-cache',
       ...options,
@@ -470,10 +454,12 @@ export class ComfyApi extends EventTarget {
    * @param detail The detail property used for a custom event ({@link CustomEventInit.detail})
    */
   dispatchCustomEvent<T extends SimpleApiEvents>(type: T): boolean
+
   dispatchCustomEvent<T extends ComplexApiEvents>(
     type: T,
     detail: ApiEventTypes[T] | null
   ): boolean
+
   dispatchCustomEvent<T extends keyof ApiEventTypes>(
     type: T,
     detail?: ApiEventTypes[T]
@@ -488,226 +474,6 @@ export class ComfyApi extends EventTarget {
   /** @deprecated Use {@link dispatchCustomEvent}. */
   override dispatchEvent(event: never): boolean {
     return super.dispatchEvent(event)
-  }
-
-  /**
-   * Poll status  for colab and other things that don't support websockets.
-   */
-  private _pollQueue() {
-    setInterval(async () => {
-      try {
-        const resp = await this.fetchApi('/prompt')
-        const status = (await resp.json()) as StatusWsMessageStatus
-        this.dispatchCustomEvent('status', status)
-      } catch (error) {
-        this.dispatchCustomEvent('status', null)
-      }
-    }, 1000)
-  }
-
-  /**
-   * Creates and connects a WebSocket for realtime updates
-   * @param {boolean} isReconnect If the socket is connection is a reconnect attempt
-   */
-  private async createSocket(isReconnect?: boolean) {
-    if (this.socket) {
-      return
-    }
-
-    let opened = false
-    let existingSession = window.name
-
-    // Build WebSocket URL with query parameters
-    const params = new URLSearchParams()
-
-    if (existingSession) {
-      params.set('clientId', existingSession)
-    }
-
-    // Get auth token and set cloud params if available
-    // Uses workspace token (if enabled) or Firebase token
-    if (isCloud) {
-      try {
-        const authStore = await this.getAuthStore()
-        const authToken = await authStore?.getAuthToken()
-        if (authToken) {
-          params.set('token', authToken)
-        }
-      } catch (error) {
-        // Continue without auth token if there's an error
-        console.warn(
-          'Could not get auth token for WebSocket connection:',
-          error
-        )
-      }
-    }
-
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const baseUrl = `${protocol}://${this.api_host}${this.api_base}/ws`
-    const query = params.toString()
-    const wsUrl = query ? `${baseUrl}?${query}` : baseUrl
-
-    this.socket = new WebSocket(wsUrl)
-    this.socket.binaryType = 'arraybuffer'
-
-    this.socket.addEventListener('open', () => {
-      opened = true
-
-      // Send feature flags as the first message
-      this.socket!.send(
-        JSON.stringify({
-          type: 'feature_flags',
-          data: this.getClientFeatureFlags()
-        })
-      )
-
-      if (isReconnect) {
-        this.dispatchCustomEvent('reconnected')
-      }
-    })
-
-    this.socket.addEventListener('error', () => {
-      if (this.socket) this.socket.close()
-      if (!isReconnect && !opened) {
-        this._pollQueue()
-      }
-    })
-
-    this.socket.addEventListener('close', () => {
-      setTimeout(async () => {
-        this.socket = null
-        await this.createSocket(true)
-      }, 300)
-      if (opened) {
-        this.dispatchCustomEvent('status', null)
-        this.dispatchCustomEvent('reconnecting')
-      }
-    })
-
-    this.socket.addEventListener('message', (event) => {
-      try {
-        if (event.data instanceof ArrayBuffer) {
-          const view = new DataView(event.data)
-          const eventType = view.getUint32(0)
-
-          let imageMime
-          switch (eventType) {
-            case 3:
-              const decoder = new TextDecoder()
-              const data = event.data.slice(4)
-              const nodeIdLength = view.getUint32(4)
-              this.dispatchCustomEvent('progress_text', {
-                nodeId: decoder.decode(data.slice(4, 4 + nodeIdLength)),
-                text: decoder.decode(data.slice(4 + nodeIdLength))
-              })
-              break
-            case 1:
-              const imageType = view.getUint32(4)
-              const imageData = event.data.slice(8)
-              switch (imageType) {
-                case 2:
-                  imageMime = 'image/png'
-                  break
-                case 1:
-                default:
-                  imageMime = 'image/jpeg'
-                  break
-              }
-              const imageBlob = new Blob([imageData], {
-                type: imageMime
-              })
-              this.dispatchCustomEvent('b_preview', imageBlob)
-              break
-            case 4:
-              // PREVIEW_IMAGE_WITH_METADATA
-              const decoder4 = new TextDecoder()
-              const metadataLength = view.getUint32(4)
-              const metadataBytes = event.data.slice(8, 8 + metadataLength)
-              const metadata = JSON.parse(decoder4.decode(metadataBytes))
-              const imageData4 = event.data.slice(8 + metadataLength)
-
-              let imageMime4 = metadata.image_type
-
-              const imageBlob4 = new Blob([imageData4], {
-                type: imageMime4
-              })
-
-              // Dispatch enhanced preview event with metadata
-              this.dispatchCustomEvent('b_preview_with_metadata', {
-                blob: imageBlob4,
-                nodeId: metadata.node_id,
-                displayNodeId: metadata.display_node_id,
-                parentNodeId: metadata.parent_node_id,
-                realNodeId: metadata.real_node_id,
-                promptId: metadata.prompt_id
-              })
-
-              // Also dispatch legacy b_preview for backward compatibility
-              this.dispatchCustomEvent('b_preview', imageBlob4)
-              break
-            default:
-              throw new Error(
-                `Unknown binary websocket message of type ${eventType}`
-              )
-          }
-        } else {
-          const msg = JSON.parse(event.data) as ApiMessageUnion
-          switch (msg.type) {
-            case 'status':
-              if (msg.data.sid) {
-                const clientId = msg.data.sid
-                this.clientId = clientId
-                window.name = clientId // use window name so it isn't reused when duplicating tabs
-                sessionStorage.setItem('clientId', clientId) // store in session storage so duplicate tab can load correct workflow
-              }
-              this.dispatchCustomEvent('status', msg.data.status ?? null)
-              break
-            case 'executing':
-              this.dispatchCustomEvent(
-                'executing',
-                msg.data.display_node || msg.data.node
-              )
-              break
-            case 'execution_start':
-            case 'execution_error':
-            case 'execution_interrupted':
-            case 'execution_cached':
-            case 'execution_success':
-            case 'progress':
-            case 'progress_state':
-            case 'executed':
-            case 'graphChanged':
-            case 'promptQueued':
-            case 'logs':
-            case 'b_preview':
-            case 'notification':
-              this.dispatchCustomEvent(msg.type, msg.data)
-              break
-            case 'feature_flags':
-              // Store server feature flags
-              this.serverFeatureFlags = msg.data
-              console.log(
-                'Server feature flags received:',
-                this.serverFeatureFlags
-              )
-              this.dispatchCustomEvent('feature_flags', msg.data)
-              break
-            default:
-              if (this._registered.has(msg.type)) {
-                // Fallback for custom types - calls super direct.
-                super.dispatchEvent(
-                  new CustomEvent(msg.type, { detail: msg.data })
-                )
-              } else if (!this.reportedUnknownMessageTypes.has(msg.type)) {
-                this.reportedUnknownMessageTypes.add(msg.type)
-                throw new Error(`Unknown message type ${msg.type}`)
-              }
-          }
-        }
-      } catch (error) {
-        console.warn('Unhandled message:', event.data, error)
-      }
-    })
   }
 
   /**
@@ -954,25 +720,6 @@ export class ComfyApi extends EventTarget {
   }
 
   /**
-   * Sends a POST request to the API
-   * @param {*} type The endpoint to post to
-   * @param {*} body Optional POST data
-   */
-  private async _postItem(type: string, body?: Record<string, unknown>) {
-    try {
-      await this.fetchApi('/' + type, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: body ? JSON.stringify(body) : undefined
-      })
-    } catch (error) {
-      console.error(error)
-    }
-  }
-
-  /**
    * Deletes an item from the specified list
    * @param {string} type The type of item to delete, queue or history
    * @param {number} id The id of the item to delete
@@ -1161,6 +908,7 @@ export class ComfyApi extends EventTarget {
     const subgraph: GlobalSubgraphData = await resp.json()
     return subgraph?.data ?? ''
   }
+
   async getGlobalSubgraphs(): Promise<Record<string, GlobalSubgraphData>> {
     const resp = await api.fetchApi('/global_subgraphs')
     if (resp.status !== 200) return {}
@@ -1304,6 +1052,285 @@ export class ComfyApi extends EventTarget {
     } catch (error) {
       console.error('Error loading fuse options:', error)
       return null
+    }
+  }
+
+  /**
+   * Gets the Firebase auth store instance using cached composable function.
+   * Caches the composable function on first call, then reuses it.
+   * Returns null for non-cloud distributions.
+   * @returns The Firebase auth store instance, or null if not in cloud
+   */
+  private async getAuthStore() {
+    if (isCloud) {
+      if (!this.authStoreComposable) {
+        const module = await import('@/stores/firebaseAuthStore')
+        this.authStoreComposable = module.useFirebaseAuthStore
+      }
+
+      return this.authStoreComposable()
+    }
+  }
+
+  /**
+   * Waits for Firebase auth to be initialized before proceeding.
+   * Includes 10-second timeout to prevent infinite hanging.
+   */
+  private async waitForAuthInitialization(): Promise<void> {
+    if (isCloud) {
+      const authStore = await this.getAuthStore()
+      if (!authStore) return
+
+      if (authStore.isInitialized) return
+
+      try {
+        await Promise.race([
+          until(authStore.isInitialized),
+          promiseTimeout(10000)
+        ])
+      } catch {
+        console.warn('Firebase auth initialization timeout after 10 seconds')
+      }
+    }
+  }
+
+  /**
+   * Poll status  for colab and other things that don't support websockets.
+   */
+  private _pollQueue() {
+    setInterval(async () => {
+      try {
+        const resp = await this.fetchApi('/prompt')
+        const status = (await resp.json()) as StatusWsMessageStatus
+        this.dispatchCustomEvent('status', status)
+      } catch (error) {
+        this.dispatchCustomEvent('status', null)
+      }
+    }, 1000)
+  }
+
+  /**
+   * Creates and connects a WebSocket for realtime updates
+   * @param {boolean} isReconnect If the socket is connection is a reconnect attempt
+   */
+  private async createSocket(isReconnect?: boolean) {
+    if (this.socket) {
+      return
+    }
+
+    let opened = false
+    let existingSession = window.name
+
+    // Build WebSocket URL with query parameters
+    const params = new URLSearchParams()
+
+    if (existingSession) {
+      params.set('clientId', existingSession)
+    }
+
+    // Get auth token and set cloud params if available
+    // Uses workspace token (if enabled) or Firebase token
+    if (isCloud) {
+      try {
+        const authStore = await this.getAuthStore()
+        const authToken = await authStore?.getAuthToken()
+        if (authToken) {
+          params.set('token', authToken)
+        }
+      } catch (error) {
+        // Continue without auth token if there's an error
+        console.warn(
+          'Could not get auth token for WebSocket connection:',
+          error
+        )
+      }
+    }
+
+    const effectiveProtocol = this._overrideProtocol ?? window.location.protocol
+    const protocol = effectiveProtocol === 'https:' ? 'wss' : 'ws'
+    const baseUrl = `${protocol}://${this.api_host}${this.api_base}/ws`
+    const query = params.toString()
+    const wsUrl = query ? `${baseUrl}?${query}` : baseUrl
+
+    this.socket = new WebSocket(wsUrl)
+    this.socket.binaryType = 'arraybuffer'
+
+    this.socket.addEventListener('open', () => {
+      opened = true
+
+      // Send feature flags as the first message
+      this.socket!.send(
+        JSON.stringify({
+          type: 'feature_flags',
+          data: this.getClientFeatureFlags()
+        })
+      )
+
+      if (isReconnect) {
+        this.dispatchCustomEvent('reconnected')
+      }
+    })
+
+    this.socket.addEventListener('error', () => {
+      if (this.socket) this.socket.close()
+      if (!isReconnect && !opened) {
+        this._pollQueue()
+      }
+    })
+
+    this.socket.addEventListener('close', () => {
+      setTimeout(async () => {
+        this.socket = null
+        await this.createSocket(true)
+      }, 300)
+      if (opened) {
+        this.dispatchCustomEvent('status', null)
+        this.dispatchCustomEvent('reconnecting')
+      }
+    })
+
+    this.socket.addEventListener('message', (event) => {
+      try {
+        if (event.data instanceof ArrayBuffer) {
+          const view = new DataView(event.data)
+          const eventType = view.getUint32(0)
+
+          let imageMime
+          switch (eventType) {
+            case 3:
+              const decoder = new TextDecoder()
+              const data = event.data.slice(4)
+              const nodeIdLength = view.getUint32(4)
+              this.dispatchCustomEvent('progress_text', {
+                nodeId: decoder.decode(data.slice(4, 4 + nodeIdLength)),
+                text: decoder.decode(data.slice(4 + nodeIdLength))
+              })
+              break
+            case 1:
+              const imageType = view.getUint32(4)
+              const imageData = event.data.slice(8)
+              switch (imageType) {
+                case 2:
+                  imageMime = 'image/png'
+                  break
+                case 1:
+                default:
+                  imageMime = 'image/jpeg'
+                  break
+              }
+              const imageBlob = new Blob([imageData], {
+                type: imageMime
+              })
+              this.dispatchCustomEvent('b_preview', imageBlob)
+              break
+            case 4:
+              // PREVIEW_IMAGE_WITH_METADATA
+              const decoder4 = new TextDecoder()
+              const metadataLength = view.getUint32(4)
+              const metadataBytes = event.data.slice(8, 8 + metadataLength)
+              const metadata = JSON.parse(decoder4.decode(metadataBytes))
+              const imageData4 = event.data.slice(8 + metadataLength)
+
+              let imageMime4 = metadata.image_type
+
+              const imageBlob4 = new Blob([imageData4], {
+                type: imageMime4
+              })
+
+              // Dispatch enhanced preview event with metadata
+              this.dispatchCustomEvent('b_preview_with_metadata', {
+                blob: imageBlob4,
+                nodeId: metadata.node_id,
+                displayNodeId: metadata.display_node_id,
+                parentNodeId: metadata.parent_node_id,
+                realNodeId: metadata.real_node_id,
+                promptId: metadata.prompt_id
+              })
+
+              // Also dispatch legacy b_preview for backward compatibility
+              this.dispatchCustomEvent('b_preview', imageBlob4)
+              break
+            default:
+              throw new Error(
+                `Unknown binary websocket message of type ${eventType}`
+              )
+          }
+        } else {
+          const msg = JSON.parse(event.data) as ApiMessageUnion
+          switch (msg.type) {
+            case 'status':
+              if (msg.data.sid) {
+                const clientId = msg.data.sid
+                this.clientId = clientId
+                window.name = clientId // use window name so it isn't reused when duplicating tabs
+                sessionStorage.setItem('clientId', clientId) // store in session storage so duplicate tab can load correct workflow
+              }
+              this.dispatchCustomEvent('status', msg.data.status ?? null)
+              break
+            case 'executing':
+              this.dispatchCustomEvent(
+                'executing',
+                msg.data.display_node || msg.data.node
+              )
+              break
+            case 'execution_start':
+            case 'execution_error':
+            case 'execution_interrupted':
+            case 'execution_cached':
+            case 'execution_success':
+            case 'progress':
+            case 'progress_state':
+            case 'executed':
+            case 'graphChanged':
+            case 'promptQueued':
+            case 'logs':
+            case 'b_preview':
+            case 'notification':
+              this.dispatchCustomEvent(msg.type, msg.data)
+              break
+            case 'feature_flags':
+              // Store server feature flags
+              this.serverFeatureFlags = msg.data
+              console.log(
+                'Server feature flags received:',
+                this.serverFeatureFlags
+              )
+              this.dispatchCustomEvent('feature_flags', msg.data)
+              break
+            default:
+              if (this._registered.has(msg.type)) {
+                // Fallback for custom types - calls super direct.
+                super.dispatchEvent(
+                  new CustomEvent(msg.type, { detail: msg.data })
+                )
+              } else if (!this.reportedUnknownMessageTypes.has(msg.type)) {
+                this.reportedUnknownMessageTypes.add(msg.type)
+                throw new Error(`Unknown message type ${msg.type}`)
+              }
+          }
+        }
+      } catch (error) {
+        console.warn('Unhandled message:', event.data, error)
+      }
+    })
+  }
+
+  /**
+   * Sends a POST request to the API
+   * @param {*} type The endpoint to post to
+   * @param {*} body Optional POST data
+   */
+  private async _postItem(type: string, body?: Record<string, unknown>) {
+    try {
+      await this.fetchApi('/' + type, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: body ? JSON.stringify(body) : undefined
+      })
+    } catch (error) {
+      console.error(error)
     }
   }
 }
