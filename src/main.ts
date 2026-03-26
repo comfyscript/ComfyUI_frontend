@@ -104,12 +104,9 @@ async function registerProxySW() {
   if (!hostParam) return
 
   try {
-    const reg = await navigator.serviceWorker.register(
-      '/ComfyUI_frontend/sw.js',
-      {
-        scope: '/ComfyUI_frontend/'
-      }
-    )
+    const reg = await navigator.serviceWorker.register('./sw.js', {
+      scope: './'
+    })
 
     // Wait for the SW to be active
     const sw = reg.active ?? reg.installing ?? reg.waiting

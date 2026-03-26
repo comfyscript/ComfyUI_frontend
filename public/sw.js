@@ -1,36 +1,40 @@
 /* eslint-env serviceworker */
 /* global self, URL, fetch, console, Response */
+// sw.js
+// @knipIgnore
 
-const FRONTEND_ORIGIN = self.location.origin
-const FRONTEND_BASE = '/ComfyUI_frontend'
+const SW_BASE = self.location.pathname.replace(/\/sw\.js$/, '')
+// → "/ComfyUI_frontend" on GitHub Pages, or "" on root deployments
 
-// Known backend path patterns from custom nodes / ComfyUI core
 const BACKEND_PATH_PATTERNS = [
-  /^\/ComfyUI_frontend\/([a-zA-Z0-9_-]+_async\/.*)/, // e.g. kjweb_async/
-  /^\/ComfyUI_frontend\/(extensions\/.*)/,
-  /^\/ComfyUI_frontend\/(custom_nodes\/.*)/
+  /\/([a-zA-Z0-9_-]+_async\/.*)/,
+  /\/(extensions\/.*)/,
+  /\/(custom_nodes\/.*)/
 ]
-
-// In-memory backend base URL set by the main app via postMessage
-let backendBase = null
 
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SET_BACKEND') {
-    backendBase = event.data.backendBase // e.g. http://127.0.0.1:8188
+    self.__backendBase__ = event.data.backendBase
   }
 })
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url)
 
-  // Only intercept requests to our own origin
-  if (url.origin !== FRONTEND_ORIGIN) return
+  if (url.origin !== self.location.origin) return
+
+  const backendBase = self.__backendBase__
   if (!backendBase) return
 
+  // Strip the SW base prefix before pattern matching
+  const strippedPath = url.pathname.startsWith(SW_BASE)
+    ? url.pathname.slice(SW_BASE.length)
+    : url.pathname
+
   for (const pattern of BACKEND_PATH_PATTERNS) {
-    const match = url.pathname.match(pattern)
+    const match = strippedPath.match(pattern)
     if (match) {
-      const backendPath = '/' + match[1] // e.g. /kjweb_async/marked.min.js
+      const backendPath = '/' + match[1]
       const rewrittenUrl = backendBase + backendPath
 
       event.respondWith(
