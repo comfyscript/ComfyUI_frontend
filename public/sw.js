@@ -87,6 +87,19 @@ async function tryFrontendThenBackend(request, url, backendBase) {
       mode: 'cors',
       credentials: 'omit'
     })
+
+    // Respect the content-type
+    const contentType = backendRes.headers.get('content-type')
+    if (url.pathname.endsWith('.js') && !contentType?.includes('javascript')) {
+      const fixed = new Response(backendRes.body, {
+        status: backendRes.status,
+        headers: {
+          ...Object.fromEntries(backendRes.headers),
+          'Content-Type': 'application/javascript'
+        }
+      })
+      return fixed
+    }
     return backendRes
   } catch (err) {
     console.warn(`[SW] Backend fetch also failed for ${backendUrl}:`, err)

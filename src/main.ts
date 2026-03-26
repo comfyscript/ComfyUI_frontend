@@ -20,6 +20,7 @@ import App from './App.vue'
 // Intentionally relative import to ensure the CSS is loaded in the right order (after litegraph.css)
 import './assets/css/style.css'
 import { i18n } from './i18n'
+import { api } from './scripts/api' // adjust import path
 
 /**
  * CRITICAL: Load remote config FIRST for cloud builds to ensure
@@ -130,6 +131,35 @@ async function registerProxySW() {
     console.warn('[SW] Registration failed:', err)
   }
 }
+
+function patchApiForRemoteFrontend() {
+  const hostParam = new URLSearchParams(window.location.search).get('host')
+  if (!hostParam) return
+
+  const frontendBase = import.meta.env.BASE_URL.replace(/\/$/, '')
+  // e.g. "/ComfyUI_frontend"
+
+  const originalGetExtensions = api.getExtensions.bind(api)
+
+  api.getExtensions = async () => {
+    const extensions = await originalGetExtensions()
+
+    return extensions.map((ext: string) => {
+      try {
+        // ext could be a full URL like http://127.0.0.1:8188/extensions/...
+        // or a relative path like /extensions/...
+        const extUrl = new URL(ext, hostParam)
+        // Rewrite to same-origin frontend path so SW can intercept
+        return frontendBase + extUrl.pathname
+        // Result: /ComfyUI_frontend/extensions/rgthree-comfy/reroute.js
+      } catch {
+        return ext
+      }
+    })
+  }
+}
+
+patchApiForRemoteFrontend()
 
 await registerProxySW()
 

@@ -61,7 +61,6 @@ import {
   fetchJobDetail,
   fetchQueue
 } from '@/platform/remote/comfyui/jobs/fetchJobs'
-import { rewriteExtensionUrl } from '@/utils/extensionUrlRewrite'
 
 interface QueuePromptRequestBody {
   client_id: string
@@ -487,12 +486,9 @@ export class ComfyApi extends EventTarget {
   /**
    * Gets a list of extension urls
    */
-
   async getExtensions(): Promise<ExtensionsResponse> {
     const resp = await this.fetchApi('/extensions', { cache: 'no-store' })
-    const urls: string[] = await resp.json()
-    // Rewrite any backend-absolute URLs to same-origin so SW can proxy them
-    return urls.map(rewriteExtensionUrl)
+    return await resp.json()
   }
 
   /**
