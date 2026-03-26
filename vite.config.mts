@@ -138,10 +138,7 @@ const gcsRedirectProxyConfig: ProxyOptions = {
 }
 
 export default defineConfig({
-  base:
-    DISTRIBUTION === 'cloud'
-      ? '/'
-      : 'https://comfyscript.github.io/ComfyUI_frontend/',
+  base: DISTRIBUTION === 'cloud' ? '/' : '/ComfyUI_frontend/',
   server: {
     host: VITE_REMOTE_DEV ? '0.0.0.0' : undefined,
     watch: {
