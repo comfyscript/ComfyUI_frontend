@@ -96,4 +96,44 @@ app
 const bootstrapStore = useBootstrapStore(pinia)
 void bootstrapStore.startStoreBootstrap()
 
+// Intercepting Requests
+async function registerProxySW() {
+  if (!('serviceWorker' in navigator)) return
+
+  const hostParam = new URLSearchParams(window.location.search).get('host')
+  if (!hostParam) return
+
+  try {
+    const reg = await navigator.serviceWorker.register(
+      '/ComfyUI_frontend/sw.js',
+      {
+        scope: '/ComfyUI_frontend/'
+      }
+    )
+
+    // Wait for the SW to be active
+    const sw = reg.active ?? reg.installing ?? reg.waiting
+    if (!sw) return
+
+    const sendBackend = (worker: ServiceWorker) => {
+      worker.postMessage({
+        type: 'SET_BACKEND',
+        backendBase: hostParam.replace(/\/$/, '') // e.g. http://127.0.0.1:8188
+      })
+    }
+
+    if (reg.active) {
+      sendBackend(reg.active)
+    } else {
+      sw.addEventListener('statechange', () => {
+        if (sw.state === 'activated') sendBackend(sw)
+      })
+    }
+  } catch (err) {
+    console.warn('[SW] Registration failed:', err)
+  }
+}
+
+await registerProxySW()
+
 app.mount('#vue-app')
