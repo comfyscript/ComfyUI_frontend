@@ -136,8 +136,9 @@ function patchApiForRemoteFrontend() {
   const hostParam = new URLSearchParams(window.location.search).get('host')
   if (!hostParam) return
 
+  // e.g. "/ComfyUI_frontend" — no trailing slash
   const frontendBase = import.meta.env.BASE_URL.replace(/\/$/, '')
-  // e.g. "/ComfyUI_frontend"
+  const backendBase = hostParam.replace(/\/$/, '') // e.g. http://127.0.0.1:8188
 
   const originalGetExtensions = api.getExtensions.bind(api)
 
@@ -146,12 +147,24 @@ function patchApiForRemoteFrontend() {
 
     return extensions.map((ext: string) => {
       try {
-        // ext could be a full URL like http://127.0.0.1:8188/extensions/...
-        // or a relative path like /extensions/...
-        const extUrl = new URL(ext, hostParam)
-        // Rewrite to same-origin frontend path so SW can intercept
-        return frontendBase + extUrl.pathname
-        // Result: /ComfyUI_frontend/extensions/rgthree-comfy/reroute.js
+        // Resolve to absolute URL against backend, then take just the pathname
+        const extUrl = new URL(ext, backendBase)
+        let pathname = extUrl.pathname
+        // e.g. pathname = "/extensions/rgthree-comfy/reroute.js"
+
+        // Strip any accidental frontendBase prefix the backend might have returned
+        if (pathname.startsWith(frontendBase + '/')) {
+          pathname = pathname.slice(frontendBase.length)
+        }
+        // Also strip /api prefix if present
+        if (pathname.startsWith('/api/')) {
+          pathname = pathname.slice(4)
+        }
+
+        // Now pathname is clean: "/extensions/rgthree-comfy/reroute.js"
+        // Prepend frontendBase so SW can intercept as same-origin
+        return frontendBase + pathname
+        // Result: "/ComfyUI_frontend/extensions/rgthree-comfy/reroute.js"
       } catch {
         return ext
       }
